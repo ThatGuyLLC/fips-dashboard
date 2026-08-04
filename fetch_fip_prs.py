@@ -32,27 +32,46 @@ def fetch_open_prs():
     return all_prs
 
 
-def extract_fip_numbers(text):
-    """Extract FIP numbers from PR title, body, or branch name.
+def extract_fip_from_title(title):
+    """Extract the subject FIP number from a PR title only.
 
-    Requires explicit FIP prefix to avoid false positives from issue numbers.
-    Accepts 1-4 digit FIP numbers to avoid false negatives.
+    Only looks at the title to avoid false associations from
+    body references (e.g. 'builds on FIP-0019' is context, not subject).
+    Skips placeholder patterns like FIPXXXX.
     """
-    if not text:
+    if not title:
+        return []
+
+    # Skip placeholder patterns (FIPXXXX, FIP-XXXX)
+    if re.search(r'FIP[-\s]?[Xx]{2,}', title, re.IGNORECASE):
         return []
 
     fip_numbers = set()
-    patterns = [
-        r'FIP[-\s]?(\d{1,4})',   # FIP-0001, FIP 14, FIP-5, FIP0001
-        r'fip[-\s]?(\d{1,4})',   # fip-0001 (lowercase)
-    ]
-
-    for pattern in patterns:
-        matches = re.findall(pattern, text, re.IGNORECASE)
-        for match in matches:
-            fip_numbers.add(match.zfill(4))
-
+    matches = re.findall(r'FIP[-\s]?(\d{1,4})', title, re.IGNORECASE)
+    for match in matches:
+        fip_numbers.add(match.zfill(4))
     return sorted(list(fip_numbers))
+
+
+def extract_fip_from_files(pr_number):
+    """Extract FIP numbers from the actual files changed in a PR.
+
+    This is the ground truth - if a PR modifies FIPS/fip-0117.md,
+    then it's about FIP-0117 regardless of what the title/body say.
+    """
+    try:
+        files = make_github_request(
+            f"{GITHUB_API_BASE}/pulls/{pr_number}/files"
+        )
+        fip_numbers = set()
+        for f in files:
+            m = re.search(r'FIPS/fip-(\d+)\.md', f.get('filename', ''), re.IGNORECASE)
+            if m:
+                fip_numbers.add(m.group(1).zfill(4))
+        return sorted(list(fip_numbers))
+    except Exception as e:
+        print(f"Warning: Could not fetch files for PR #{pr_number}: {e}")
+        return []
 
 
 def categorize_pr(pr):
@@ -76,7 +95,14 @@ def categorize_pr(pr):
 
 
 def process_prs(prs):
-    """Process PRs and extract FIP information."""
+    """Process PRs and extract FIP information.
+
+    Uses a priority system:
+    1. FIP numbers from actual files changed (ground truth)
+    2. FIP numbers from the PR title (subject FIP)
+    3. If neither found, check if generally FIP-related
+    Body text is NOT searched to avoid false associations.
+    """
     fip_prs = []
 
     for pr in prs:
@@ -89,14 +115,19 @@ def process_prs(prs):
         updated_at = pr.get('updated_at', '')
         branch = pr.get('head', {}).get('ref', '')
 
-        # Extract FIP numbers
-        search_text = f"{title} {body} {branch}"
-        fip_numbers = extract_fip_numbers(search_text)
+        # Priority 1: Check actual files changed
+        fip_numbers = extract_fip_from_files(number)
 
-        # If no FIP numbers found, check if it's a general FIP-related PR
+        # Priority 2: Fall back to title extraction
         if not fip_numbers:
-            if 'fip' in search_text.lower():
+            fip_numbers = extract_fip_from_title(title)
+
+        # If still nothing, mark as General if FIP-related
+        if not fip_numbers:
+            if 'fip' in title.lower():
                 fip_numbers = ['General']
+            else:
+                continue
 
         categories = categorize_pr(pr)
 

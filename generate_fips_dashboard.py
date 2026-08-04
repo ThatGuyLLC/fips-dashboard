@@ -48,49 +48,87 @@ def fetch_open_prs():
 
     return all_prs
 
-def extract_fip_numbers(text):
-    """Extract FIP numbers from PR title, body, or branch name.
+def extract_fip_from_title(title):
+    """Extract the subject FIP number from a PR title only.
 
-    Requires explicit FIP prefix to avoid false positives.
-    Accepts 1-4 digit FIP numbers to avoid false negatives.
+    Only looks at the title to avoid false associations from
+    body references (e.g. 'builds on FIP-0019' is context, not subject).
+    Skips placeholder patterns like FIPXXXX.
     """
-    if not text:
+    if not title:
+        return []
+
+    # Skip placeholder patterns (FIPXXXX, FIP-XXXX)
+    if re.search(r'FIP[-\s]?[Xx]{2,}', title, re.IGNORECASE):
         return []
 
     fip_numbers = set()
-    patterns = [
-        r'FIP[-\s]?(\d{1,4})',   # FIP-0001, FIP 14, FIP-5
-        r'fip[-\s]?(\d{1,4})',   # fip-0001 (lowercase)
-    ]
-    for pattern in patterns:
-        matches = re.findall(pattern, text, re.IGNORECASE)
-        for match in matches:
-            fip_numbers.add(match.zfill(4))
+    matches = re.findall(r'FIP[-\s]?(\d{1,4})', title, re.IGNORECASE)
+    for match in matches:
+        fip_numbers.add(match.zfill(4))
     return sorted(list(fip_numbers))
 
+
+def extract_fip_from_files(pr_number):
+    """Extract FIP numbers from the actual files changed in a PR.
+
+    This is the ground truth — if a PR modifies FIPS/fip-0117.md,
+    then it's about FIP-0117 regardless of what the title/body say.
+    """
+    try:
+        files = make_github_request(
+            f"{GITHUB_API_BASE}/pulls/{pr_number}/files"
+        )
+        fip_numbers = set()
+        for f in files:
+            m = re.search(r'FIPS/fip-(\d+)\.md', f.get('filename', ''), re.IGNORECASE)
+            if m:
+                fip_numbers.add(m.group(1).zfill(4))
+        return sorted(list(fip_numbers))
+    except Exception as e:
+        print(f"Warning: Could not fetch files for PR #{pr_number}: {e}")
+        return []
+
+
 def process_prs(prs):
-    """Process PRs and extract FIP information"""
+    """Process PRs and extract FIP information.
+
+    Uses a priority system:
+    1. FIP numbers from actual files changed (ground truth)
+    2. FIP numbers from the PR title (subject FIP)
+    3. If neither found, marked as 'General'
+    Body text is NOT searched to avoid false associations.
+    """
     fip_prs = {}
     for pr in prs:
         title = pr.get('title', '')
-        body = pr.get('body') or ''  # Guard against None
-        branch = pr.get('head', {}).get('ref', '')
-        search_text = f"{title} {body} {branch}"
-        fip_numbers = extract_fip_numbers(search_text)
-        
+        pr_num = pr.get('number')
+
+        # Priority 1: Check actual files changed
+        fip_numbers = extract_fip_from_files(pr_num)
+
+        # Priority 2: Fall back to title extraction
+        if not fip_numbers:
+            fip_numbers = extract_fip_from_title(title)
+
+        # If still nothing, skip (don't create false associations)
+        if not fip_numbers:
+            print(f"  PR #{pr_num}: No FIP number found ('{title[:60]}')")
+            continue
+
         pr_info = {
-            'number': pr.get('number'),
+            'number': pr_num,
             'title': title,
             'url': pr.get('html_url'),
             'author': pr.get('user', {}).get('login', 'Unknown'),
             'created_at': pr.get('created_at', ''),
         }
-        
+
         for fip_num in fip_numbers:
             if fip_num not in fip_prs:
                 fip_prs[fip_num] = []
             fip_prs[fip_num].append(pr_info)
-    
+
     return fip_prs
 
 def generate_prs_section_html(fip_prs):
