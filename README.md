@@ -1,6 +1,6 @@
 # Filecoin Improvement Proposals (FIPs) Dashboard
 
-🔗 **Live Dashboard: [tanisha-katara.github.io/fips-dashboard](https://tanisha-katara.github.io/fips-dashboard/)**
+🔗 **Live Dashboard: [https://thatguyllc.github.io/fips-dashboard/fips-dashboard-static.html**
 
 A real-time dashboard tracking the status of all Filecoin Improvement Proposals (FIPs), including month-on-month status changes and open pull requests.
 
