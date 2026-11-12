@@ -56,11 +56,11 @@ PLAN_CLASS = {'ready': 'approved', 'risk': 'waiting', 'deferred-in': 'changes'}
 
 
 def plan_flags(num, flags, compact=False):
-    """Flags for a FIP that appears in an upcoming upgrade's scope planning."""
+    """Flags for a FIP that appears in the active upgrade's scope planning."""
     out = []
     for f in (flags or {}).get(num, []):
-        tip = (f'Mentioned in NV{f["nv"]} scope planning'
-               + (f': {f["label"]}' if f['label'] else '') + f' ({f["name"]})')
+        tip = (f'In the active upgrade planning (NV{f["nv"]})'
+               + (f': {f["label"]}' if f['label'] else '') + f'. Row: {f["name"]}')
         text = f'NV{f["nv"]}' if compact else f'NV{f["nv"]} {PLAN_SHORT[f["readiness"]]}'
         out.append(f'<a class="pill nv-flag {PLAN_CLASS.get(f["readiness"], "")}" '
                    f'href="network-upgrades.html#plan-nv{f["nv"]}" title="{esc(tip)}">{esc(text)}</a>')
@@ -92,7 +92,8 @@ def stats_html(fips, open_lc, prs, prs_loaded=True, plans=None, flags=None):
     ]
     for p in plans or []:
         n = sum(1 for v in (flags or {}).values() if any(f['nv'] == p['nv'] for f in v))
-        cards.append((f'In NV{p["nv"]} planning', f'<a href="network-upgrades.html#plan-nv{p["nv"]}">{n}</a>', bool(n)))
+        cards.append((f'Active upgrade planning · NV{p["nv"]}',
+                      f'<a href="network-upgrades.html#plan-nv{p["nv"]}">{n}</a>', bool(n)))
     return '<section class="stats">' + ''.join(
         f'<div class="stat{" accent" if accent else ""}"><div class="label">{esc(label)}</div>'
         f'<div class="value">{value}</div></div>'
@@ -181,7 +182,7 @@ def in_flight_html(fips, history, files, prs_grouped, discussed=None, flags=None
                  'See <a href="#by-status">All FIPs by status</a>.</p>')
     return f'''<section class="card" id="in-flight">
 <div class="card-head"><h2>In flight</h2>
-<span class="hint">Draft, Last Call, Accepted and Deferred FIPs that changed status in the last year, plus any FIP mentioned in upcoming upgrade scope planning, most recent first.*</span></div>
+<span class="hint">Draft, Last Call, Accepted and Deferred FIPs that changed status in the last year, plus any FIP in the active upgrade planning, most recent first.*</span></div>
 <div class="card-body">{body}</div></section>'''
 
 
@@ -221,7 +222,7 @@ def by_status_html(fips, prs_grouped, flags=None):
         rows.append(f'<tr><td>{badge(status)}</td><td class="num"><strong>{len(groups[status])}</strong></td>'
                     f'<td><div class="chips">{"".join(chips)}</div></td></tr>')
     return f'''<section class="card" id="by-status">
-<div class="card-head"><h2>All FIPs by status</h2><span class="hint">FRCs are excluded. Blue dots show open PRs; NV tags mark FIPs in upcoming upgrade scope planning.</span></div>
+<div class="card-head"><h2>All FIPs by status</h2><span class="hint">FRCs are excluded. Blue dots show open PRs; NV tags mark FIPs in the active upgrade planning.</span></div>
 <div class="card-body"><div class="table-scroll"><table class="data">
 <thead><tr><th>Status</th><th class="num">Count</th><th>FIPs</th></tr></thead>
 <tbody>{"".join(rows)}</tbody></table></div></div></section>'''
@@ -301,10 +302,11 @@ def main():
     plans, flags = [], {}
     try:
         import scope_planning as sp
-        plans = sp.upcoming(sp.fetch_planning(), upgrades)
+        plans = sp.active(sp.fetch_planning(), upgrades)
         titles = {n: f['title'] for n, f in fips.items()}
         titles.update({n: m.get('title', '') for n, m in files.items() if n not in titles and m.get('title')})
         flags = sp.fip_flags(plans, titles, files, processed)
+        print(f'Active planning: {", ".join(f"NV{p['nv']}" for p in plans) or "none"}')
         print(f'Scope planning flags: {", ".join(f"FIP-{n}" for n in sorted(flags)) or "none"}')
     except Exception as e:
         print(f'Warning: scope planning unavailable: {e}')

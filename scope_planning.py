@@ -220,6 +220,17 @@ def _norm_title(text):
     return re.sub(r'[^a-z0-9]+', ' ', text.lower()).strip()
 
 
+def active(planning, upgrades, now=None):
+    """The active planning cycle: the lowest-numbered upgrade not yet live on
+    mainnet that has a planning discussion. Returns [entry] or [].
+
+    Once that upgrade activates, the next one's planning becomes active, so
+    the FIPs page rolls from NV30 to NV31 without code changes.
+    """
+    plans = upcoming(planning, upgrades, now)
+    return [min(plans, key=lambda p: p['nv'])] if plans else []
+
+
 def upcoming(planning, upgrades, now=None):
     """Planning entries for upgrades that haven't reached mainnet yet."""
     now = now or datetime.now(timezone.utc)
